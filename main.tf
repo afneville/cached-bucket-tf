@@ -42,7 +42,7 @@ data "aws_iam_policy_document" "content_bucket_policy_document" {
 resource "aws_cloudfront_distribution" "cdn" {
   enabled             = true
   default_root_object = "index.html"
-  aliases             = [var.subdomain]
+  aliases             = var.domain_names
   custom_error_response {
     error_code         = 404
     response_code      = 404
@@ -88,13 +88,14 @@ resource "aws_cloudfront_distribution" "cdn" {
 
 data "aws_route53_zone" "hosted_zone" {
   provider = aws.n-virginia
-  name     = var.domain
+  name     = var.hosted_zone
 }
 
 resource "aws_acm_certificate" "acm_certificate" {
-  provider          = aws.n-virginia
-  domain_name       = var.subdomain
-  validation_method = "DNS"
+  provider                  = aws.n-virginia
+  domain_name               = var.domain_names[0]
+  subject_alternative_names = length(var.domain_names) > 1 ? slice(var.domain_names, 1, length(var.domain_names)) : []
+  validation_method         = "DNS"
 }
 
 resource "aws_route53_record" "domain_validation_options" {
@@ -115,17 +116,20 @@ resource "aws_route53_record" "domain_validation_options" {
   zone_id         = data.aws_route53_zone.hosted_zone.zone_id
 }
 
-resource "aws_acm_certificate_validation" "example" {
+resource "aws_acm_certificate_validation" "certificate_validation" {
   provider                = aws.n-virginia
   certificate_arn         = aws_acm_certificate.acm_certificate.arn
   validation_record_fqdns = [for record in aws_route53_record.domain_validation_options : record.fqdn]
 }
 
-resource "aws_route53_record" "cloudfront_domain" {
+resource "aws_route53_record" "cloudfront_domains" {
   provider = aws.n-virginia
-  zone_id  = data.aws_route53_zone.hosted_zone.zone_id
-  name     = var.subdomain
-  type     = "A"
+  for_each = toset(var.domain_names)
+
+  allow_overwrite = true
+  zone_id = data.aws_route53_zone.hosted_zone.zone_id
+  name    = each.value
+  type    = "A"
   alias {
     name                   = aws_cloudfront_distribution.cdn.domain_name
     zone_id                = aws_cloudfront_distribution.cdn.hosted_zone_id
